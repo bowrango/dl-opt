@@ -37,6 +37,22 @@ testLoader = DataLoader(testData, batch_size=batchSize, shuffle=False)
 
 criterion = nn.CrossEntropyLoss()
 
+class EarlyStopper:
+    def __init__(self, patience=1):
+        self.patience = patience
+        self.counter = 0
+        self.min_validation_loss = float('inf')
+
+    def early_stop(self, validation_loss):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss > self.min_validation_loss:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
+
 class Block(nn.Module):
     # Basic Block for ResNet-18/34
     expansion = 1
@@ -140,7 +156,6 @@ class ResNet18(nn.Module):
 if __name__ == "__main__":
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
 
     model = ResNet18(num_classes=10).to(device)
 
@@ -151,9 +166,10 @@ if __name__ == "__main__":
 
     train_accuracies = []
     test_accuracies = []
-    epochs = []
 
+    early_stopper = EarlyStopper(patience=5)
     numEpochs = 10
+
     for epoch in range(numEpochs):
         print(f"Epoch {epoch+1}/{numEpochs}")
 
@@ -180,43 +196,45 @@ if __name__ == "__main__":
         model.eval()
         test_correct = 0
         test_total = 0
+        test_loss = 0
         with torch.no_grad():
             for data, label in testLoader:
                 data, label = data.to(device), label.to(device)
                 logits = model(data)
+                loss = criterion(logits, label)
+                test_loss += loss.item()
 
                 _, predicted = torch.max(logits.data, 1)
                 test_total += label.size(0)
                 test_correct += (predicted == label).sum().item()
 
         test_accuracy = 100 * test_correct / test_total
+        test_loss = test_loss / len(testLoader)
 
         # Store results
         train_accuracies.append(train_accuracy)
         test_accuracies.append(test_accuracy)
-        epochs.append(epoch)
 
         print(f"  Train Acc: {train_accuracy:.2f}%, Test Acc: {test_accuracy:.2f}%")
 
-    # Plot results after training
+        if early_stopper.early_stop(test_loss):
+            print(f"Early stopping at epoch {epoch+1}")
+            break
+
+    # Plot results after epoch
     plt.figure(figsize=(12, 6))
-    plt.plot(epochs, train_accuracies, 'b-', linewidth=2, label='Train Accuracy', marker='o')
-    plt.plot(epochs, test_accuracies, 'r-', linewidth=2, label='Test Accuracy', marker='s')
+    plt.plot(range(numEpochs), train_accuracies, 'b-', linewidth=2, label='Train Accuracy', marker='o')
+    plt.plot(range(numEpochs), test_accuracies, 'r-', linewidth=2, label='Test Accuracy', marker='s')
 
     # Add epoch markers
-    for epoch in epochs:
+    for epoch in range(numEpochs):
         plt.axvline(x=epoch, color='black', linestyle='--', alpha=0.3)
 
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy (%)')
-    plt.title(f'Training and Test Accuracy vs Epochs\nlr={learning_rate}, lambda={weight_decay}')
+    plt.title(f'Training and Test Accuracy vs Epochs')
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.ylim(0, 100)
     plt.xlim(-0.5, numEpochs - 0.5)
     plt.show()
-
-    # test()
-
-    # y = model(torch.randn(1, 3, 224, 224))
-    # print(y.shape)  # torch.Size([1, 1000])

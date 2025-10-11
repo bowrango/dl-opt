@@ -151,21 +151,11 @@ if __name__ == "__main__":
 
     train_accuracies = []
     test_accuracies = []
-    epoch_points = []
-
-    plt.figure(figsize=(12, 6))
-    plt.ion()
-    train_line, = plt.plot([], [], 'b-', linewidth=1, alpha=0.7, label='Train Accuracy')
-    test_line, = plt.plot([], [], 'r-', linewidth=1, alpha=0.7, label='Test Accuracy')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy (%)')
-    plt.title('Training and Test Accuracy vs Epochs')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
+    epochs = []
 
     numEpochs = 10
-
     for epoch in range(numEpochs):
+        print(f"Epoch {epoch+1}/{numEpochs}")
 
         # Training
         model.train()
@@ -185,7 +175,6 @@ if __name__ == "__main__":
             optimizer.step()
 
         train_accuracy = 100 * train_correct / train_total
-        train_accuracies.append(train_accuracy)
 
         # Testing
         model.eval()
@@ -201,22 +190,30 @@ if __name__ == "__main__":
                 test_correct += (predicted == label).sum().item()
 
         test_accuracy = 100 * test_correct / test_total
+
+        # Store results
+        train_accuracies.append(train_accuracy)
         test_accuracies.append(test_accuracy)
-        epoch_points.append(epoch)
+        epochs.append(epoch)
 
-        # Plot
-        train_line.set_data(epoch_points, train_accuracies)
-        test_line.set_data(epoch_points, test_accuracies)
-        plt.xlim(-0.5, numEpochs - 0.5)
-        if train_accuracies and test_accuracies:
-            plt.ylim(0, max(max(train_accuracies), max(test_accuracies)) + 5)
-        plt.draw()
-        plt.pause(0.01)
+        print(f"  Train Acc: {train_accuracy:.2f}%, Test Acc: {test_accuracy:.2f}%")
 
-        # Add epoch marker
+    # Plot results after training
+    plt.figure(figsize=(12, 6))
+    plt.plot(epochs, train_accuracies, 'b-', linewidth=2, label='Train Accuracy', marker='o')
+    plt.plot(epochs, test_accuracies, 'r-', linewidth=2, label='Test Accuracy', marker='s')
+
+    # Add epoch markers
+    for epoch in epochs:
         plt.axvline(x=epoch, color='black', linestyle='--', alpha=0.3)
 
-    plt.ioff()
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title(f'Training and Test Accuracy vs Epochs\nlr={learning_rate}, lambda={weight_decay}')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.ylim(0, 100)
+    plt.xlim(-0.5, numEpochs - 0.5)
     plt.show()
 
     # test()

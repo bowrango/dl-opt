@@ -145,43 +145,76 @@ if __name__ == "__main__":
     model = ResNet18(num_classes=10).to(device)
 
     learning_rate = 0.0001
-    adam = optim.Adam(model.parameters(), lr=learning_rate)
+    weight_decay = 0.01  # L2 regularization lambda
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    #optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    losses = []
+    train_accuracies = []
+    test_accuracies = []
+    epoch_points = []
+
     plt.figure(figsize=(12, 6))
     plt.ion()
-    line, = plt.plot([], [], 'b-', linewidth=1, alpha=0.7)
-    plt.xlabel('Iteration')
-    plt.ylabel('Loss')
-    plt.title('Training Loss per Iteration')
+    train_line, = plt.plot([], [], 'b-', linewidth=1, alpha=0.7, label='Train Accuracy')
+    test_line, = plt.plot([], [], 'r-', linewidth=1, alpha=0.7, label='Test Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Training and Test Accuracy vs Epochs')
     plt.grid(True, alpha=0.3)
+    plt.legend()
 
-    numEpochs = 1
+    numEpochs = 10
 
-    model.train()
     for epoch in range(numEpochs):
-        for batch_idx, (data, label) in enumerate(trainLoader):
+
+        # Training
+        model.train()
+        train_correct = 0
+        train_total = 0
+        for data, label in trainLoader:
             data, label = data.to(device), label.to(device)
-            adam.zero_grad()
+            optimizer.zero_grad()
             logits = model(data)
             loss = criterion(logits, label)
-            print(loss.item())
 
-            losses.append(loss.item())
-
-            if batch_idx % 10 == 0:
-                line.set_data(range(len(losses)), losses)
-                plt.xlim(0, len(losses))
-                plt.ylim(min(losses), max(losses))
-                plt.draw()
-                plt.pause(0.01)
+            _, predicted = torch.max(logits.data, 1)
+            train_total += label.size(0)
+            train_correct += (predicted == label).sum().item()
 
             loss.backward()
-            adam.step()
+            optimizer.step()
 
-        plt.axvline(x=len(losses), color='black', linestyle='--', alpha=0.7,
-                   label=str(epoch))
-        plt.legend()
+        train_accuracy = 100 * train_correct / train_total
+        train_accuracies.append(train_accuracy)
+
+        # Testing
+        model.eval()
+        test_correct = 0
+        test_total = 0
+        with torch.no_grad():
+            for data, label in testLoader:
+                data, label = data.to(device), label.to(device)
+                logits = model(data)
+
+                _, predicted = torch.max(logits.data, 1)
+                test_total += label.size(0)
+                test_correct += (predicted == label).sum().item()
+
+        test_accuracy = 100 * test_correct / test_total
+        test_accuracies.append(test_accuracy)
+        epoch_points.append(epoch)
+
+        # Plot
+        train_line.set_data(epoch_points, train_accuracies)
+        test_line.set_data(epoch_points, test_accuracies)
+        plt.xlim(-0.5, numEpochs - 0.5)
+        if train_accuracies and test_accuracies:
+            plt.ylim(0, max(max(train_accuracies), max(test_accuracies)) + 5)
+        plt.draw()
+        plt.pause(0.01)
+
+        # Add epoch marker
+        plt.axvline(x=epoch, color='black', linestyle='--', alpha=0.3)
 
     plt.ioff()
     plt.show()

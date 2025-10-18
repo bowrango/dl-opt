@@ -182,6 +182,7 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             logits = model(data)
             loss = criterion(logits, label)
+            print(loss)
 
             _, predicted = torch.max(logits.data, 1)
             train_total += label.size(0)

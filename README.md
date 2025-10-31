@@ -1,6 +1,6 @@
 
 
-Notes on deep learning optimization.
+Experiments with deep learning models and optimization
 
 1) Create and activate the virtual environment
 

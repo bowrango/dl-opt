@@ -150,7 +150,6 @@ class ResNet18(nn.Module):
 
         return x
 
-        
 
 
 if __name__ == "__main__":

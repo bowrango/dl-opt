@@ -44,9 +44,6 @@ plt.xlabel('t')
 plt.ylabel('loss')
 plt.show()
 
-
-
-
 # wb = 1
 # sqrt3 = np.sqrt(3)
 

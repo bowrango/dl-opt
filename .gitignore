@@ -1,5 +1,8 @@
-venv/
+.venv/
 .vscode/
+docs
+gd/__pycache__
 .DS_Store
 models/data
 models/__pycache__
+results/

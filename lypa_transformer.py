@@ -1,116 +1,115 @@
 
-# Calculates Lyapunov exponents to estimate edge of chaos initialization. 
-# This analysis is based on:
+# Computes the edge of chaos for randomly initialized transformers. 
+# It backs the success of standard initialization schemes that choose α∼1/√L
 
 # Geometric Dynamics of Signal Propagation Predict Trainability of Transformers
-# Cowsik, Nebabu, Qi, Ganguli (arXiv:2403.02579)
-
-# It backs the success of standard initialization schemes that choose α∼1/√L.
+# (https://arxiv.org/pdf/2403.02579)
 
 from dataclasses import dataclass
 from typing import Tuple
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 @dataclass
-class H:
-    d_model: int = 64
-    d_mlp: int = 4*64
+class Config:
+    d: int = 64
+    d_mlp: int = 64
     n_tokens: int = 256
-    alpha_A: float = 0.5     # residual strength for attention branch
-    alpha_M: float = 0.5     # residual strength for MLP branch
-    sigma_A: float = 1.0     # controls Q,K scale so Var(Q^T K) ~ σ_A^2/d
-    sigma_w: float = 2.0     # MLP first-layer scale
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    # hyperparameters:
+    alpha_A: float = 1.0     # ATTN gain
+    alpha_M: float = 1.0     # MLP gain
+    sigma_A: float = 1.0     # ATTN variance
+    sigma_w: float = 1.0     # MLP variance
 
 dtype = torch.float32
 torch.set_default_dtype(dtype)
 EPS = torch.finfo(dtype).eps
 
-class AcausalSelfAttention(nn.Module):
+class Head(nn.Module):
     """ 
+    non-casual attention head
     """
-    def __init__(self, d_model: int, sigma_A: float):
+    def __init__(self, d: int, sigma_A: float):
         super().__init__()
-        self.d = d_model
-        qk_std = math.sqrt(sigma_A/d_model)   # Assumption 3.3
-        # qk_std = (sigma_A**0.5)/math.sqrt(self.d)
-        self.query = nn.Linear(d_model, d_model, bias=False)
-        self.key = nn.Linear(d_model, d_model, bias=False)
-        self.value = nn.Linear(d_model, d_model, bias=False)
+        self.d = d
+        # Assumption 3.3: var[Q^T K] ~ σ_A^2/d
+        qk_std = math.sqrt(sigma_A/d)
+        self.query = nn.Linear(d, d, bias=False)
+        self.key = nn.Linear(d, d, bias=False)
+        self.value = nn.Linear(d, d, bias=False)
         nn.init.normal_(self.query.weight, 0.0, qk_std)
         nn.init.normal_(self.key.weight, 0.0, qk_std)
-        nn.init.normal_(self.value.weight, 0.0, 1.0/math.sqrt(d_model))
+        nn.init.normal_(self.value.weight, 0.0, 1.0/math.sqrt(d))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         k = self.key(x)
         q = self.query(x)
         logits = (q @ k.T) * self.d**-0.5 
-        A = F.softmax(logits, dim=-1)
-        out = self.value(A@x)
+        A = logits.softmax(dim=-1)
+        out = self.value(A @ x)
+        # (n_tokens, d)
         return out
 
 class MLP(nn.Module):
-    def __init__(self, d_model: int, d_mlp: int, sigma_w: float):
+    def __init__(self, d: int, d_mlp: int, sigma_w: float):
         super().__init__()
-        self.fc1 = nn.Linear(d_model, d_mlp, bias=False)
-        self.fc2 = nn.Linear(d_mlp, d_model, bias=False)
-        # use pre-activation variance 
-        nn.init.normal_(self.fc1.weight, 0.0, sigma_w/math.sqrt(d_model))
-        # use readout unit variance 
-        nn.init.normal_(self.fc2.weight, 0.0, 1/math.sqrt(d_mlp))
+        self.fc1 = nn.Linear(d, d_mlp, bias=False)
+        self.fc2 = nn.Linear(d_mlp, d, bias=False)
+        nn.init.normal_(self.fc1.weight, 0.0, sigma_w/math.sqrt(d))
+        nn.init.normal_(self.fc2.weight, 0.0, sigma_w/math.sqrt(d))
 
-    def forward(self, x):
-        return self.fc2(torch.tanh(self.fc1(x)))
+    def forward(self, x) -> torch.Tensor:
+        out = self.fc2(torch.tanh(self.fc1(x)))
+        # (n_tokens, d)
+        return out
 
 class TransformerBlock(nn.Module):
     """
     single-head self-attention block followed by tokenwise 2-layer perceptron
     """
-    def __init__(self, h: H):
+    def __init__(self, h: Config):
         super().__init__()
         self.h = h
-        self.attn = AcausalSelfAttention(h.d_model, h.sigma_A)
-        self.mlp  = MLP(h.d_model, h.d_mlp, h.sigma_w)
+        self.attn = Head(h.d, h.sigma_A)
+        self.mlp  = MLP(h.d, h.d_mlp, h.sigma_w)
 
     def layernorm(self, x: torch.Tensor) -> torch.Tensor:
         nrm = x.norm(dim=-1, keepdim=True).clamp_min(EPS)
-        out = x / nrm * math.sqrt(self.h.d_model)
-        # (n_tokens, d_model)
+        out = x / nrm * math.sqrt(self.h.d)
+        # (n_tokens, d)
         return out
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Equation 4 (Figure 1)
-        a_comp = math.sqrt(max(0.0, 1.0 - self.h.alpha_A**2))
-        m_comp = math.sqrt(max(0.0, 1.0 - self.h.alpha_M**2))
+        # See footnote under Equation 12 
+        # a_comp = math.sqrt(1.0 - self.h.alpha_A**2)
+        # m_comp = math.sqrt(1.0 - self.h.alpha_M**2)
+        a_comp = 1.0
+        m_comp = 1.0
+        # Equation 4 (seen as Figure 1)
         x = a_comp*x + self.h.alpha_A*self.attn(self.layernorm(x))
-        x = m_comp*x + self.h.alpha_M*self.mlp(self.layernorm(x))
-        return x
-
-# @torch.no_grad()
-# def make_tokens(n: int, d: int, device) -> torch.Tensor:
-#     """ 
-#     """
-#     x = torch.randn(n, d, device=device)
-#     x = x / x.norm(dim=1, keepdim=True) * math.sqrt(d)
-#     return x
+        out = m_comp*x + self.h.alpha_M*self.mlp(self.layernorm(x))
+        # (n_tokens, d)
+        return out
 
 @torch.no_grad()
-def make_tokens(n: int, d: int, rho: float = 0.99, device="cpu"):
+def make_tokens(n: int, d: int, rho: float = 0.99, device="cpu") -> torch.Tensor:
     """
-    E||X_i||^2 = d  and  E[X_i · X_j] = rho * d  (i != j).
+    E[||X_i||^2] = d, E[X_i*X_j] = rho*d, and E[p/q] = rho
+    Appendix A
     """
     g  = torch.randn(d, device=device)
     Z  = torch.randn(n, d, device=device)
     X  = math.sqrt(rho) * g.unsqueeze(0) + math.sqrt(1.0 - rho) * Z
+    # (n_tokens, d)
     return X
 
-def qp_stats(x: torch.Tensor) -> Tuple[float, float]:
+def get_qp(x: torch.Tensor) -> Tuple[float, float]:
     """ 
+    Compute (q,p) for the expansion ratio
     """
     C = x @ x.T
     n = C.shape[0]
@@ -119,11 +118,10 @@ def qp_stats(x: torch.Tensor) -> Tuple[float, float]:
     q = diag.mean().item()
     # off-diagonal average
     p = ((C.sum() - diag.sum()) / (n*(n-1))).item()
-    # print(f"q={q} and p={p}")
     return max(EPS, q), max(EPS, p)
 
 @torch.no_grad()
-def angle_lyapunov_exponent(h: H, seeds: int = 1) -> float:
+def angle_lyapunov_exponent(h: Config, seeds: int = 1) -> float:
     """
     λ_a ≈ log((1 - p'/q') / (1 - p/q))
     Section 4.1
@@ -132,16 +130,17 @@ def angle_lyapunov_exponent(h: H, seeds: int = 1) -> float:
     for s in range(seeds):
         torch.manual_seed(s)
         block = TransformerBlock(h).to(h.device).eval()
-        x0 = make_tokens(h.n_tokens, h.d_model, device=h.device)
-        q, p = qp_stats(x0)
-        x1 = block(x0)
-        q1, p1 = qp_stats(x1)
+        x0 = make_tokens(h.n_tokens, h.d, device=h.device)
+        q, p = get_qp(x0)
         r0 = max(EPS, 1.0 - p/q)
+        x1 = block(x0)
+        q1, p1 = get_qp(x1)
         r1 = max(EPS, 1.0 - p1/q1)
         vals.append(math.log(r1/r0))
-    return sum(vals)/len(vals)
+    lambda_a = sum(vals)/len(vals)
+    return lambda_a
 
-def gradient_lyapunov_exponent(h: H, depth: int = 16, seeds: int = 1) -> float:
+def gradient_lyapunov_exponent(h: Config, depth: int = 16, seeds: int = 1) -> float:
     """
     λ_g ≈ (1/L) * log || d(X_L · R) / dX_0 ||_F^2
     Sections 3.4 & 4.2
@@ -150,7 +149,7 @@ def gradient_lyapunov_exponent(h: H, depth: int = 16, seeds: int = 1) -> float:
     for s in range(seeds):
         torch.manual_seed(s)
         blocks = nn.ModuleList([TransformerBlock(h).to(h.device).eval() for _ in range(depth)])
-        X0 = make_tokens(h.n_tokens, h.d_model, rho=0.99, device=h.device).requires_grad_(True)
+        X0 = make_tokens(h.n_tokens, h.d, rho=0.99, device=h.device).requires_grad_(True)
         Xt = X0
         for b in blocks:
             Xt = b(Xt)
@@ -158,25 +157,41 @@ def gradient_lyapunov_exponent(h: H, depth: int = 16, seeds: int = 1) -> float:
         scalar = (Xt * R).sum()
         (dX,) = torch.autograd.grad(scalar, X0, retain_graph=False, create_graph=False, allow_unused=False)
         v = (dX**2).sum().item()
-        vals.append(math.log(max(v, EPS)) / depth)
-    return sum(vals)/len(vals)
+        vals.append(math.log(max(EPS, v)) / depth)
+    lambda_g = sum(vals)/len(vals) 
+    return lambda_g
 
 if __name__ == "__main__":
-    # grid search for edge of chaos where \lamda_a is 0
-    res = 25
-    Z = torch.zeros(res, res, dtype=dtype)
-    for i,sw in enumerate(torch.linspace(1, 4, res)):
-        for j,a in enumerate(torch.linspace(0, 1, res)):
-            h = H(alpha_A=a, alpha_M=a, sigma_w=sw, sigma_A=0.6)
-            Z[i,j] = angle_lyapunov_exponent(h, seeds=5)
 
+    res = 50
+
+    # edge of chaos covers where \lambda_a is close to 0
     # Figure 4 (top-right)
-    vlim = torch.abs(Z).max()
-    cmap = plt.get_cmap("bwr")  # blue-white-red
-    fig, ax = plt.subplots(figsize=(5.5,4.5), dpi=130)
-    im = ax.imshow(Z, origin='lower', aspect='auto', cmap=cmap, norm=mcolors.TwoSlopeNorm(vcenter=0.0, vmin=-vlim, vmax=vlim))
-    ax.set_xlabel(r'$\alpha = \alpha_A = \alpha_M$')
-    ax.set_ylabel(r'$\sigma_w$')
-    fig.colorbar(im, ax=ax, label=r'$\lambda_a$')
+    alphas = torch.linspace(0, 1, res)
+    sigmas = torch.linspace(1, 4, res)
+    Z = torch.zeros(res, res)
+    for i,sw in enumerate(sigmas):
+        for j,a in enumerate(alphas):
+            c = Config(alpha_A=a, alpha_M=a, sigma_w=sw)
+            Z[i,j] = angle_lyapunov_exponent(c)
+
+    vmin = float(Z.min().item())
+    vmax = float(Z.max().item())
+    cbar = mcolors.TwoSlopeNorm(vcenter=0.0, vmin=vmin, vmax=vmax)
+    extent = [float(alphas.min()), float(alphas.max()),
+            float(sigmas.min()), float(sigmas.max())]
+
+    fig, ax = plt.subplots(figsize=(5.5, 4.5), dpi=130)
+    plt.title('Numerical Token Angle Exponent')
+    im = ax.imshow(Z, origin="lower", aspect="auto", cmap="bwr", norm=cbar, extent=extent)
+
+    ax.set_xlabel(r"$\alpha = \alpha_A = \alpha_M$")
+    ax.set_ylabel(r"$\sigma_w$")
+    cb = fig.colorbar(im, ax=ax, label=r"$\lambda_a$")
+
+    # draw λ_a=0 contour
+    # CS = ax.contour(alphas, sigmas, Z, levels=[0.0], colors="k", linewidths=1.2)
+    # ax.clabel(CS, fmt={0.0: r"$\lambda_a=0$"}, fontsize=8)
+
     plt.tight_layout()
     plt.show()

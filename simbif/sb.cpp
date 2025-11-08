@@ -14,58 +14,6 @@
 
 // [1]: https://www.science.org/doi/full/10.1126/sciadv.aav2372
 
-std::pair<double, std::vector<double>> calculate_min_J_o(const std::vector<std::vector<double>>& J) {
-    /*
-    Exact solver for ordered J using two-cluster pattern theorem [1].
-    For ordered couplings, the ground state partitions spins into two contiguous clusters.
-    This reduces the search space from O(2^N) to O(N).
-    */
-    int N = J.size();
-    std::vector<double> H_l;
-    std::vector<std::vector<double>> s_l;
-
-    for (int M = 1; M < N; ++M) {
-        std::vector<double> s(N);
-        // Set first M elements to 1
-        for (int i = 0; i < M; ++i) {
-            s[i] = 1.0;
-        }
-        // Set remaining elements to -1
-        for (int i = M; i < N; ++i) {
-            s[i] = -1.0;
-        }
-
-        double H = 0.0;
-        for (int i = 0; i < N; ++i) {
-            for (int j = 0; j < N; ++j) {
-                H += s[i] * J[i][j] * s[j];
-            }
-        }
-        H_l.push_back(H);
-        s_l.push_back(s);
-    }
-
-    // TODO
-    auto min_H_iter = std::min_element(H_l.begin(), H_l.end());
-    int min_H_index = std::distance(H_l.begin(), min_H_iter);
-    return { *min_H_iter, s_l[min_H_index] };
-}
-
-std::vector<std::vector<double>> J_o(int N, double d = 1.0) {
-    /*
-    Ordered Coupling: J_ij = (i/N)^d + (j/N)^d normalized by N^2.
-    Structure enables analytical solution via two-cluster theorem.
-    */
-    std::vector<std::vector<double>> matrix(N, std::vector<double>(N));
-    double scale = std::pow(N, 2);
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            matrix[i][j] = (std::pow((i + 1.0)/N, d) + std::pow((j + 1.0)/N, d)) / scale;
-        }
-    }
-    return matrix;
-}
-
 std::vector<std::vector<double>> randnj(int N, double sigma) {
     /*
     Random Coupling: J_ij ~ Normal(0, sigma^2)
@@ -86,7 +34,7 @@ std::vector<std::vector<double>> randnj(int N, double sigma) {
 }
 
 double potential(const std::vector<double>& s, const std::vector<std::vector<double>>& J) {
-    // Compute Ising energy: H = -0.5(s^T*J*s)
+    // Ising Energy: H = -0.5(s^T*J*s)
     int N = s.size();
     double H = 0.0;
     for (int i = 0; i < N; ++i) {
@@ -129,7 +77,7 @@ std::vector<std::vector<double>> simbif(const std::vector<std::vector<double>>& 
     */
     int N = J.size();
 
-    // TODO
+    // TODO Experiment with alpha-stable Levy?
     std::mt19937 gen(std::random_device{}());
     std::uniform_real_distribution<double> dist(0.0, 1.0);
 
@@ -165,7 +113,7 @@ std::vector<std::vector<double>> simbif(const std::vector<std::vector<double>>& 
             }
         }
 
-        // Update momentum (eq. 13): dy/dt = -(p_f-p)x + eps0 * J * x
+        // Update momentum (eq. 13): dy/dt = -(p_f-p)x + eps0 * f
         // Restoring force (p_f-p)x weakens as p->p_f to allow bifurcation
         for (int i = 0; i < K; ++i) {
             for (int j = 0; j < N; ++j) {

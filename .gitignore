@@ -6,3 +6,5 @@ gd/__pycache__
 models/data
 models/__pycache__
 results/
+simbif/*.png
+simbif/*.dat

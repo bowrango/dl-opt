@@ -12,14 +12,9 @@ sb: sb.cpp
 sa: sa.cpp
 	$(CXX) $(CXXFLAGS) sa.cpp -o sa
 
-bench: bench.cpp
-	$(CXX) $(CXXFLAGS) bench.cpp -o bench
-
 clean:
 	rm -f $(TARGETS)
 
 run: sb
 	./sb
 
-bench-run: bench
-	./bench
